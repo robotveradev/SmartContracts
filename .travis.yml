@@ -8,4 +8,4 @@ install:
 
 script:
   - ./scripts/test.sh
-  - ./scripts/coveralls.sh
+  - bash ./scripts/coveralls.sh
