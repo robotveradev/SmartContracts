@@ -1,4 +1,5 @@
 [![Build Status](https://travis-ci.org/robotveradev/SmartContracts.svg?branch=master)](https://travis-ci.org/robotveradev/SmartContracts)
+[![Coverage Status](https://coveralls.io/repos/github/robotveradev/SmartContracts/badge.svg?branch=master)](https://coveralls.io/github/robotveradev/SmartContracts?branch=master)
 # SmartContracts
 Ethereum SmartContracts for Vera Decentralised Recruitment Platform
 
