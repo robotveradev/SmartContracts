@@ -6,7 +6,8 @@
     "test": "scripts/test.sh",
     "lint": "eslint .",
     "console": "truffle console",
-    "coverage": "scripts/coverage.sh"
+    "coverage": "scripts/coverage.sh",
+    "coveralls": "scripts/coveralls.sh"
   },
   "repository": {
     "type": "git",
@@ -35,7 +36,7 @@
     "chai": "^4.1.2",
     "chai-as-promised": "^7.0.0",
     "chai-bignumber": "^2.0.0",
-    "coveralls": "^2.13.1",
+    "coveralls": "^2.13.3",
     "eslint": "^4.11.0",
     "eslint-config-standard": "^10.2.1",
     "eslint-plugin-import": "^2.12.0",
