@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/robotveradev/SmartContracts.svg?branch=master)](https://travis-ci.org/robotveradev/SmartContracts)
 # SmartContracts
 Ethereum SmartContracts for Vera Decentralised Recruitment Platform
 
