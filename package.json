@@ -1,0 +1,59 @@
+{
+  "name": "vera-smart-contracts",
+  "version": "1.5.0",
+  "description": "Ethereum SmartContracts for Vera Decentralised Recruitment Platform",
+  "scripts": {
+    "test": "scripts/test.sh",
+    "lint": "eslint .",
+    "console": "truffle console",
+    "coverage": "scripts/coverage.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/robotveradev/SmartContracts.git"
+  },
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart",
+    "contracts",
+    "security",
+    "zeppelin"
+  ],
+  "author": "OnGrid Systems <info@ongrid.pro>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/robotveradev/SmartContracts/issues"
+  },
+  "homepage": "https://github.com/robotveradev",
+  "devDependencies": {
+    "babel-preset-es2015": "^6.18.0",
+    "babel-preset-stage-2": "^6.18.0",
+    "babel-preset-stage-3": "^6.17.0",
+    "babel-register": "^6.26.0",
+    "chai": "^4.1.2",
+    "chai-as-promised": "^7.0.0",
+    "chai-bignumber": "^2.0.0",
+    "coveralls": "^2.13.1",
+    "eslint": "^4.11.0",
+    "eslint-config-standard": "^10.2.1",
+    "eslint-plugin-import": "^2.8.0",
+    "eslint-plugin-node": "^5.2.1",
+    "eslint-plugin-promise": "^3.6.0",
+    "eslint-plugin-standard": "^3.1.0",
+    "ethereumjs-testrpc": "^6.0.1",
+    "ethereumjs-util": "^5.2.0",
+    "mocha-lcov-reporter": "^1.3.0",
+    "solidity-coverage": "^0.4.15",
+    "truffle": "^4.1.7",
+    "truffle-hdwallet-provider": "0.0.3"
+  },
+  "dependencies": {
+    "babel": "^6.23.0",
+    "babel-cli": "^6.26.0",
+    "babel-polyfill": "^6.26.0",
+    "dotenv": "^4.0.0",
+    "mocha": "^5.1.1",
+    "solhint": "^1.1.10"
+  }
+}
