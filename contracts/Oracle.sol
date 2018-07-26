@@ -11,15 +11,17 @@ contract Oracle is Ownable {
     address public beneficiary;
     ERC20 public token;
 
-    enum candidate_status {open_to_suggestions, in_search_of_work, closed}
+    enum member_status {open_to_suggestions, in_search_of_work, not_accepting_offers}
 
-    address[] employers;
+    address[] members;
 
-    address[] candidates;
+    address[] companies;
 
     uint8 public service_fee;
 
     uint256 public pipeline_max_length;
+
+    uint8 public number_of_confirmations;
 
     struct Action {
         uint256 id;
@@ -29,37 +31,42 @@ contract Oracle is Ownable {
     }
 
     struct Vacancy {
-        address keeper;
         bool enabled;
         uint allowed;
     }
 
-    // vacancy uuid => vacancy
-    mapping(bytes32 => Vacancy) public vacancies;
+    //company => members
+    mapping(address => address[]) company_members;
 
-    // Vacancy uuid => vacancy pipeline
-    mapping(bytes32 => Action[]) public vacancy_pipeline;
+    //member => companies
+    mapping(address => address[]) member_companies;
 
-    // vacancy uuid => candidate addresses, subscribed to vacancy
-    mapping(bytes32 => address[]) public candidates_on_vacancy;
+    // company address => vacancy uuid => vacancy
+    mapping(address => mapping(bytes32 => Vacancy)) public vacancies;
 
-    // employer address => employer vacancies list
+    // company address => vacancy uuid => vacancy pipeline
+    mapping(address => mapping(bytes32 => Action[])) public vacancy_pipeline;
+
+    // company address => vacancy uuid => candidate addresses, subscribed to vacancy
+    mapping(address => mapping(bytes32 => address[])) public members_on_vacancy;
+
+    // company address => company vacancies list
     mapping(address => bytes32[]) vacancy_uuids;
 
-    // candidate address => status
-    mapping(address => candidate_status) public candidate_statuses;
+    // member address => status
+    mapping(address => member_status) public members_statuses;
 
-    // candidate address => vacancies, candidate subscribed to
-    mapping(address => bytes32[]) public candidate_vacancies;
+    // member address => vacancies, member subscribed to
+    mapping(address => bytes32[]) public member_vacancies;
 
-    // vacancy uuid => candidate address => current pipeline action index for candidate
-    mapping(bytes32 => mapping(address => uint128)) current_candidate_action_index;
+    // company address => vacancy uuid => member address => current pipeline action index for member
+    mapping(address => mapping(bytes32 => mapping(address => uint128))) member_current_action_index;
 
-    // vacancy uuid => candidate address => vacancy passed?
-    mapping(bytes32 => mapping(address => bool)) public vacancy_candidate_pass;
+    // company address => vacancy uuid => member address => vacancy passed?
+    mapping(address => mapping(bytes32 => mapping(address => bool))) public member_vacancy_pass;
 
-    // vacancy uuid => candidate address => vacancy starts?
-    mapping(bytes32 => mapping(address => bool)) public vacancy_candidate_starts;
+    // company address => vacancy uuid => member address => vacancy starts?
+    mapping(address => mapping(bytes32 => mapping(address => bool))) public member_vacancy_starts;
 
     struct Fact {
         address from;
@@ -71,29 +78,42 @@ contract Oracle is Ownable {
         mapping(bytes32 => Fact) dict;
         bytes32[] keys;
     }
-    // candidate address => facts about candidate
+
+    // member address => facts about member
     mapping(address => Fact_dict) facts;
 
+    // member facts number_of_confirmations (sender, member, fact_id, is verify)
+    mapping(address => mapping(address => mapping(bytes32 => bool))) member_fact_confirmations;
+    // member => fact uuid => number of confirmations
+    mapping(address => mapping(bytes32 => uint256)) facts_confirmations_count;
+
     // events
-    event NewEmployer(address employer_address);
-    event NewCandidate(address candidate_address);
-    event NewVacancy(address employer_address, bytes32 id);
+    event NewMember(address member);
+    event NewCompany(address company);
+    event NewVacancy(address company, bytes32 id);
+    event NewAction(address company, bytes32 vacancy_uuid);
+
     event NewPipelineMaxLength(address sender, uint256 count);
+    event NewServiceFee(address sender, uint8 fee);
+    event NewBeneficiary(address sender, address beneficiary);
+
     event NewFact(address sender, bytes32 id);
-    event CandidateRevoked(bytes32 vacancy, address candidate, address revoked_by);
-    event CandidateChangeStatus(address candidate, candidate_status status);
-    event Subscribed(bytes32 vacancy_uuid, address candidate);
+    event FactConfirmationAdded(address sender, address member, bytes32 fact_id);
+    event FactVerified(address member, bytes32 fact_id);
 
-    modifier onlyEmployer(bytes32 _uuid) {
-        require(vacancies[_uuid].keeper == msg.sender || Ownable(vacancies[_uuid].keeper).owners(msg.sender));
+    event MemberRevoked(address company, bytes32 vac_uuid, address member);
+    event MemberLevelUp(address company, bytes32 vac_uuid, address member, uint256 to);
+    event MemberPassPipeline(address company, bytes32 vac_uuid, address member);
+
+    event MemberStatusChanged(address member, member_status status);
+    event Subscribed(address company, bytes32 vacancy_uuid, address member);
+
+    modifier whenVacancyEnabled(address _company, bytes32 _uuid) {
+        require(vacancies[_company][_uuid].enabled);
         _;
     }
 
-    modifier whenVacancyEnabled(bytes32 _uuid) {
-        require(vacancies[_uuid].enabled);
-        _;
-    }
-
+    //"Vera", 1, "0xca35b7d915458ef540ade6068dfe2f44e8fa733c","0xca35b7d915458ef540ade6068dfe2f44e8fa733c"
     function Oracle(string _name, uint8 _service_fee, address _beneficiary, address _token) public {
         name = _name;
         service_fee = _service_fee;
@@ -102,27 +122,38 @@ contract Oracle is Ownable {
         pipeline_max_length = 6;
     }
 
-    function new_fact(address _candidate, string _fact) public onlyOwner {
+    function new_fact(address _member, string _fact) public {
         bytes32 _id = keccak256(abi.encodePacked(_fact));
-        facts[_candidate].dict[_id] = Fact(msg.sender, now, _fact);
-        facts[_candidate].keys.push(_id);
+        facts[_member].dict[_id] = Fact(msg.sender, now, _fact);
+        facts[_member].keys.push(_id);
         emit NewFact(msg.sender, _id);
     }
 
-    function keys_of_facts_length(address _candidate) public view returns (uint) {
-        return facts[_candidate].keys.length;
+    function keys_of_facts_length(address _member) public view returns (uint) {
+        return facts[_member].keys.length;
     }
 
-    function keys_of_facts(address _candidate) public view returns (bytes32[]) {
-        return facts[_candidate].keys;
+    function keys_of_facts(address _member) public view returns (bytes32[]) {
+        return facts[_member].keys;
     }
 
-    function fact_key_by_id(address _candidate, uint256 _index) public view returns (bytes32) {
-        return facts[_candidate].keys[_index];
+    function fact_key_by_id(address _member, uint256 _index) public view returns (bytes32) {
+        return facts[_member].keys[_index];
     }
 
-    function get_fact(address _candidate, bytes32 _id) public view returns (address from, uint256 time, string fact) {
-        return (facts[_candidate].dict[_id].from, facts[_candidate].dict[_id].time, facts[_candidate].dict[_id].fact);
+    function get_fact(address _member, bytes32 _id) public view returns (address from, uint256 time, string fact) {
+        return (facts[_member].dict[_id].from,
+        facts[_member].dict[_id].time,
+        facts[_member].dict[_id].fact);
+    }
+
+    function verify_fact(address _member, bytes32 _id) public {
+        // member not verify factsct yet
+        require(!member_fact_confirmations[msg.sender][_member][_id]);
+        // member cannot verify his own fact
+        require(facts[_member].dict[_id].from != msg.sender);
+        facts_confirmations_count[_member][_id].add(1);
+        emit FactConfirmationAdded(msg.sender, _member, _id);
     }
 
     function new_pipeline_max_length(uint256 _new_max) public onlyOwner {
@@ -130,205 +161,247 @@ contract Oracle is Ownable {
         emit NewPipelineMaxLength(msg.sender, _new_max);
     }
 
-    // percent awarded for test passed by candidate
+    // percent awarded for test/interview passed by member
     function new_service_fee(uint8 _service_fee) public onlyOwner {
         service_fee = _service_fee;
+        emit NewServiceFee(msg.sender, _service_fee);
     }
 
     function new_beneficiary(address _beneficiary) public onlyOwner {
         beneficiary = _beneficiary;
+        emit NewBeneficiary(msg.sender, _beneficiary);
     }
 
-    function new_employer(address _employer) public onlyOwner {
-        employers.push(_employer);
-        emit NewEmployer(_employer);
+    function new_company() public {
+        companies.push(msg.sender);
+        emit NewCompany(msg.sender);
     }
 
-    function get_employers() public view returns (address[]) {
-        return employers;
+    function get_companies() public view returns (address[]) {
+        return companies;
     }
 
-    function new_candidate(address _candidate) public onlyOwner {
-        candidates.push(_candidate);
-        emit NewCandidate(_candidate);
+    function new_member() public {
+        members.push(msg.sender);
+        emit NewMember(msg.sender);
     }
 
-    function get_candidates() public view returns (address[]) {
-        return candidates;
+    function get_members() public view returns (address[]) {
+        return members;
     }
 
-    function change_candidate_status(address _candidate, candidate_status _status) public onlyOwner {
-        candidate_statuses[_candidate] = _status;
+    // called from company address
+    function new_company_member(address _member) public {
+        company_members[msg.sender].push(_member);
+        member_companies[_member].push(msg.sender);
     }
 
-    function get_candidate_current_action_index(bytes32 _vac_uuid, address _candidate) public view returns (int256) {
-        if (!vacancy_candidate_starts[_vac_uuid][_candidate]) {
-            return -1;
+    function member_companies_length(address _member) public view returns (uint256 length) {
+        length = member_companies[_member].length;
+    }
+
+    function member_company_by_index(address _member, uint256 _index) public view returns (address company) {
+        company = member_companies[_member][_index];
+    }
+
+    function get_member_companies(address _member) public view returns (address[]) {
+        return member_companies[_member];
+    }
+
+    function company_members_length(address _company) public view returns (uint256 length) {
+        length = company_members[_company].length;
+    }
+
+    function company_member_by_index(address _company, uint256 _index) public view returns (address member) {
+        member = company_members[_company][_index];
+    }
+
+    function get_company_members(address _company) public view returns (address[]) {
+        return company_members[_company];
+    }
+
+    function change_member_status(member_status _status) public {
+        members_statuses[msg.sender] = _status;
+        emit MemberStatusChanged(msg.sender, _status);
+    }
+
+    function get_member_current_action_index(address _company_address, bytes32 _vac_uuid, address _member) public view returns (int256) {
+        if (!member_vacancy_starts[_company_address][_vac_uuid][_member]) {
+            return - 1;
         }
-        return current_candidate_action_index[_vac_uuid][_candidate];
+        return member_current_action_index[_company_address][_vac_uuid][_member];
     }
 
     // 0xdd870fa1b7c4700f2bd7f44238821c26f7392148, "vac",1000
-    function new_vacancy(address _employer_address, bytes32 _uuid, uint256 _allowed) public onlyOwner {
-        vacancies[_uuid].allowed = _allowed;
-        vacancies[_uuid].keeper = _employer_address;
-        vacancy_uuids[_employer_address].push(_uuid);
-        emit NewVacancy(_employer_address, _uuid);
+    // must be called from company address
+    function new_vacancy(bytes32 _uuid, uint256 _allowed) public {
+        vacancies[msg.sender][_uuid].allowed = _allowed;
+        vacancy_uuids[msg.sender].push(_uuid);
+        emit NewVacancy(msg.sender, _uuid);
     }
 
-    function new_vacancy_pipeline_action(bytes32 _vac_uuid, bytes32 _title, uint256 _fee, bool _appr) public onlyEmployer(_vac_uuid) {
-        uint256 new_index = get_vacancy_pipeline_length(_vac_uuid);
+    // must be called from company address
+    function new_vacancy_pipeline_action(bytes32 _vac_uuid, bytes32 _title, uint256 _fee, bool _appr) public {
+        uint256 new_index = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
         require(new_index < pipeline_max_length);
-        vacancy_pipeline[_vac_uuid].push(Action(new_index, _title, _fee, _appr));
+        vacancy_pipeline[msg.sender][_vac_uuid].push(Action(new_index, _title, _fee, _appr));
+        emit NewAction(msg.sender, _vac_uuid);
     }
 
-    function change_vacancy_pipeline_action(bytes32 _vac_uuid,
-        uint256 _action_index,
-        bytes32 _title,
-        uint256 _fee,
-        bool _app) public onlyEmployer(_vac_uuid) {
-        require(_action_index < get_vacancy_pipeline_length(_vac_uuid));
-        vacancy_pipeline[_vac_uuid][_action_index] = Action(_action_index, _title, _fee, _app);
+    // must be called from company address
+    function change_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index,
+        bytes32 _title, uint256 _fee, bool _app) public {
+        require(_action_index < get_vacancy_pipeline_length(msg.sender, _vac_uuid));
+        vacancy_pipeline[msg.sender][_vac_uuid][_action_index] = Action(_action_index, _title, _fee, _app);
     }
 
-    function delete_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index) public onlyEmployer(_vac_uuid) returns (bool) {
-        uint256 pipeline_length = get_vacancy_pipeline_length(_vac_uuid);
+    // must be called from company address
+    function delete_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index) public returns (bool) {
+        uint256 pipeline_length = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
         require(_action_index < pipeline_length);
-        delete vacancy_pipeline[_vac_uuid][_action_index];
+        delete vacancy_pipeline[msg.sender][_vac_uuid][_action_index];
         for (uint256 i = _action_index; i < pipeline_length - 1; i++) {
-            vacancy_pipeline[_vac_uuid][i] = vacancy_pipeline[_vac_uuid][i + 1];
-            vacancy_pipeline[_vac_uuid][i].id = vacancy_pipeline[_vac_uuid][i].id - 1;
+            vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i + 1];
+            vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id - 1;
         }
-        vacancy_pipeline[_vac_uuid].length--;
+        vacancy_pipeline[msg.sender][_vac_uuid].length--;
     }
-
-    function move_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _from_pos, uint256 _to_pos) public onlyEmployer(_vac_uuid) {
+    // must be called from company address
+    function move_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _from_pos, uint256 _to_pos) public {
         if (_from_pos == _to_pos) {
             return;
         }
-        uint256 pipeline_length = get_vacancy_pipeline_length(_vac_uuid);
+        uint256 pipeline_length = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
         require(_from_pos < pipeline_length && _to_pos < pipeline_length);
-        Action memory act = vacancy_pipeline[_vac_uuid][_from_pos];
+        Action memory act = vacancy_pipeline[msg.sender][_vac_uuid][_from_pos];
         uint256 i;
         if (_from_pos > _to_pos) {
             for (i = _from_pos; i > _to_pos; i--) {
-                vacancy_pipeline[_vac_uuid][i] = vacancy_pipeline[_vac_uuid][i - 1];
-                vacancy_pipeline[_vac_uuid][i].id = vacancy_pipeline[_vac_uuid][i].id + 1;
+                vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i - 1];
+                vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id + 1;
             }
         } else {
             for (i = _from_pos; i < _to_pos; i++) {
-                vacancy_pipeline[_vac_uuid][i] = vacancy_pipeline[_vac_uuid][i + 1];
-                vacancy_pipeline[_vac_uuid][i].id = vacancy_pipeline[_vac_uuid][i].id - 1;
+                vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i + 1];
+                vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id - 1;
             }
         }
         act.id = _to_pos;
-        vacancy_pipeline[_vac_uuid][_to_pos] = act;
+        vacancy_pipeline[msg.sender][_vac_uuid][_to_pos] = act;
+    }
+    // must be called from company address
+    function change_vacancy_amount(bytes32 _uuid, uint256 _allowed) public {
+        vacancies[msg.sender][_uuid].allowed = _allowed;
     }
 
-    function change_vacancy_amount(bytes32 _uuid, uint256 _allowed) public onlyEmployer(_uuid) {
-        vacancies[_uuid].allowed = _allowed;
+    function company_vacancies_length(address _company_address) public view returns (uint) {
+        return vacancy_uuids[_company_address].length;
     }
 
-    function employer_vacancies_length(address _employer_address) public view returns (uint) {
-        return vacancy_uuids[_employer_address].length;
+    function member_vacancies_length(address _member) public view returns (uint) {
+        return member_vacancies[_member].length;
     }
 
-    function candidate_vacancies_length(address _candidate) public view returns (uint) {
-        return candidate_vacancies[_candidate].length;
+    function vacancy_members_length(address _company, bytes32 _vac_uuid) public view returns (uint) {
+        return members_on_vacancy[_company][_vac_uuid].length;
     }
 
-    function vacancy_candidates_length(bytes32 _vac_uuid) public view returns (uint) {
-        return candidates_on_vacancy[_vac_uuid].length;
+    function company_vacancies(address _company_address) public view returns (bytes32[]) {
+        return vacancy_uuids[_company_address];
     }
 
-    function employer_vacancies(address _employer_address) public view returns (bytes32[]) {
-        return vacancy_uuids[_employer_address];
+    function company_vacancy_uuid_by_id(address _company_address, uint256 _index) public view returns (bytes32) {
+        return vacancy_uuids[_company_address][_index];
     }
 
-    function employer_vacancy_by_id(address _employer_address, uint256 _index) public view returns (bytes32) {
-        return vacancy_uuids[_employer_address][_index];
+    function get_vacancy_pipeline_length(address _company, bytes32 _uuid) public view returns (uint256) {
+        return vacancy_pipeline[_company][_uuid].length;
     }
 
-    function get_vacancy_pipeline_length(bytes32 _uuid) public view returns (uint256) {
-        return vacancy_pipeline[_uuid].length;
+    // must be called from company address
+    function disable_vac(bytes32 _uuid) public {
+        vacancies[msg.sender][_uuid].enabled = false;
     }
 
-    function disable_vac(bytes32 _uuid) public onlyEmployer(_uuid) {
-        vacancies[_uuid].enabled = false;
+    // must be called from company address
+    function enable_vac(bytes32 _uuid) public {
+        vacancies[msg.sender][_uuid].enabled = true;
+    }
+    // must call from member address
+    function subscribe(address _company, bytes32 _vac_uuid) public whenVacancyEnabled(_company, _vac_uuid) {
+        require(get_member_current_action_index(_company, _vac_uuid, msg.sender) == - 1);
+        member_vacancies[msg.sender].push(_vac_uuid);
+        members_on_vacancy[_company][_vac_uuid].push(msg.sender);
+        member_vacancy_starts[_company][_vac_uuid][msg.sender] = true;
+        emit Subscribed(_company, _vac_uuid, msg.sender);
     }
 
-    function enable_vac(bytes32 _uuid) public onlyEmployer(_uuid) {
-        vacancies[_uuid].enabled = true;
-    }
+    function process_action(address _company, bytes32 _vac_uuid, address _member) private whenVacancyEnabled(_company, _vac_uuid) {
+        require(!member_vacancy_pass[_company][_vac_uuid][_member]);
 
-    function subscribe(bytes32 _vac) public whenVacancyEnabled(_vac) {
-        require(get_candidate_current_action_index(_vac, msg.sender) == - 1);
-        candidate_vacancies[msg.sender].push(_vac);
-        candidates_on_vacancy[_vac].push(msg.sender);
-        vacancy_candidate_starts[_vac][msg.sender] = true;
-        emit Subscribed(_vac, msg.sender);
-    }
-
-    function process_action(bytes32 _vac_uuid, address _candidate) private  whenVacancyEnabled(_vac_uuid) {
-        require(!vacancy_candidate_pass[_vac_uuid][_candidate]);
-
-        if (current_candidate_action_index[_vac_uuid][_candidate] >= get_vacancy_pipeline_length(_vac_uuid)) {
-            vacancy_candidate_pass[_vac_uuid][_candidate] = true;
+        if (member_current_action_index[_company][_vac_uuid][_member] >= get_vacancy_pipeline_length(_company, _vac_uuid)) {
+            member_vacancy_pass[_company][_vac_uuid][_member] = true;
+            emit MemberPassPipeline(_company, _vac_uuid, _member);
             return;
         }
-        Action memory current_action = vacancy_pipeline[_vac_uuid][current_candidate_action_index[_vac_uuid][_candidate]];
+        Action memory current_action = vacancy_pipeline[_company][_vac_uuid][member_current_action_index[_company][_vac_uuid][_member]];
         if (current_action.fee > 0) {
-            require(vacancies[_vac_uuid].allowed >= current_action.fee);
+            require(vacancies[_company][_vac_uuid].allowed >= current_action.fee);
             uint256 service_amount = current_action.fee.div(100).mul(service_fee);
-            uint256 candidate_amount = current_action.fee.sub(service_amount);
-            token.transferFrom(vacancies[_vac_uuid].keeper, beneficiary, service_amount);
-            token.transferFrom(vacancies[_vac_uuid].keeper, _candidate, candidate_amount);
-            vacancies[_vac_uuid].allowed = vacancies[_vac_uuid].allowed.sub(current_action.fee);
+            uint256 member_reward_amount = current_action.fee.sub(service_amount);
+            token.transferFrom(_company, beneficiary, service_amount);
+            token.transferFrom(_company, _member, member_reward_amount);
+            vacancies[_company][_vac_uuid].allowed = vacancies[_company][_vac_uuid].allowed.sub(current_action.fee);
         }
-        if (vacancy_pipeline[_vac_uuid].length - 1 == current_action.id) {
-            vacancy_candidate_pass[_vac_uuid][_candidate] = true;
+        if (vacancy_pipeline[_company][_vac_uuid].length - 1 == current_action.id) {
+            member_vacancy_pass[_company][_vac_uuid][_member] = true;
+            emit MemberPassPipeline(_company, _vac_uuid, _member);
         } else {
-            current_candidate_action_index[_vac_uuid][_candidate] = current_candidate_action_index[_vac_uuid][_candidate] + 1;
+            uint128 cur_id = member_current_action_index[_company][_vac_uuid][_member];
+            member_current_action_index[_company][_vac_uuid][_member] = cur_id + 1;
+            emit MemberLevelUp(_company, _vac_uuid, _member, cur_id + 1);
         }
     }
 
-    function level_up(bytes32 _vac_uuid, address _candidate) public onlyOwner {
-        require(vacancy_candidate_starts[_vac_uuid][_candidate]);
-        require(!vacancy_pipeline[_vac_uuid][current_candidate_action_index[_vac_uuid][_candidate]].approvable);
-        process_action(_vac_uuid, _candidate);
+    function level_up(address _company, bytes32 _vac_uuid, address _member) public onlyOwner {
+        require(member_vacancy_starts[_company][_vac_uuid][_member]);
+        require(!vacancy_pipeline[_company][_vac_uuid][member_current_action_index[_company][_vac_uuid][_member]].approvable);
+        process_action(_company, _vac_uuid, _member);
     }
 
-    function approve_level_up(bytes32 _vac_uuid, address _candidate) public onlyEmployer(_vac_uuid) {
-        require(vacancy_candidate_starts[_vac_uuid][_candidate]);
-        process_action(_vac_uuid, _candidate);
+    // called from company address
+    function approve_level_up(bytes32 _vac_uuid, address _member) public {
+        require(member_vacancy_starts[msg.sender][_vac_uuid][_member]);
+        process_action(msg.sender, _vac_uuid, _member);
     }
 
-    function reset_candidate_action(bytes32 _vac, address _candidate) public onlyEmployer(_vac) {
-        require(!vacancy_candidate_pass[_vac][_candidate]);
-        current_candidate_action_index[_vac][_candidate] = 0;
-        vacancy_candidate_starts[_vac][_candidate] = false;
-        removeByValue(_vac, _candidate);
-        emit CandidateRevoked(_vac, _candidate, msg.sender);
+    // called from company address
+    function reset_member_action(bytes32 _vac_uuid, address _member) public {
+        require(!member_vacancy_pass[msg.sender][_vac_uuid][_member]);
+        member_current_action_index[msg.sender][_vac_uuid][_member] = 0;
+        member_vacancy_starts[msg.sender][_vac_uuid][_member] = false;
+        removeByValue(msg.sender, _vac_uuid, _member);
+        emit MemberRevoked(msg.sender, _vac_uuid, _member);
     }
 
-    function removeByValue(bytes32 _vac_uuid, address _candidate) private {
-        uint256 i = find(_vac_uuid, _candidate);
-        removeByIndex(_vac_uuid, i);
+    function removeByValue(address _company, bytes32 _vac_uuid, address _member) private {
+        uint256 i = find(_company, _vac_uuid, _member);
+        removeByIndex(_company, _vac_uuid, i);
     }
 
-    function find(bytes32 _vac_uuid, address _candidate) private view returns (uint) {
+    function find(address _company, bytes32 _vac_uuid, address _member) private view returns (uint) {
         uint256 i = 0;
-        while (candidates_on_vacancy[_vac_uuid][i] != _candidate) {
+        while (members_on_vacancy[_company][_vac_uuid][i] != _member) {
             i++;
         }
         return i;
     }
 
-    function removeByIndex(bytes32 _vac_uuid, uint i) private {
-        while (i < candidates_on_vacancy[_vac_uuid].length - 1) {
-            candidates_on_vacancy[_vac_uuid][i] = candidates_on_vacancy[_vac_uuid][i + 1];
+    function removeByIndex(address _company, bytes32 _vac_uuid, uint i) private {
+        while (i < members_on_vacancy[_company][_vac_uuid].length - 1) {
+            members_on_vacancy[_company][_vac_uuid][i] = members_on_vacancy[_company][_vac_uuid][i + 1];
             i++;
         }
-        candidates_on_vacancy[_vac_uuid].length--;
+        members_on_vacancy[_company][_vac_uuid].length--;
     }
 }
