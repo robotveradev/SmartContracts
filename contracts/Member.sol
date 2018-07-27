@@ -15,8 +15,16 @@ contract Member is Withdrawable {
         oracle.new_member();
     }
 
+    function verify_fact(address _member, bytes32 _fact_id) public onlyOwner {
+        oracle.verify_fact(_member, _fact_id);
+    }
+
     function approve_company_tokens(address _company, uint256 _amount) public onlyOwner {
         Company(_company).approve_tokens(_amount);
+    }
+
+    function withdraw_company_tokens(address _token, address _company, address _to, uint256 _amount) public onlyOwner {
+        Company(_company).withdraw(_token, _to, _amount);
     }
 
     function change_status(Oracle.member_status _status) public onlyOwner {

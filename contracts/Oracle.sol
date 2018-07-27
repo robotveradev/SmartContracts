@@ -3,6 +3,8 @@ pragma solidity ^0.4.21;
 import './ownership/Ownable.sol';
 import './math/SafeMath.sol';
 import './token/ERC20.sol';
+import './Member.sol';
+import './Facts.sol';
 
 contract Oracle is Ownable {
     using SafeMath for uint256;
@@ -10,6 +12,7 @@ contract Oracle is Ownable {
     string public name;
     address public beneficiary;
     ERC20 public token;
+    Facts facts;
 
     enum member_status {open_to_suggestions, in_search_of_work, not_accepting_offers}
 
@@ -56,6 +59,9 @@ contract Oracle is Ownable {
     // member address => status
     mapping(address => member_status) public members_statuses;
 
+    // member address => FactVerified
+    mapping(address => bool) public member_verified;
+
     // member address => vacancies, member subscribed to
     mapping(address => bytes32[]) public member_vacancies;
 
@@ -68,92 +74,69 @@ contract Oracle is Ownable {
     // company address => vacancy uuid => member address => vacancy starts?
     mapping(address => mapping(bytes32 => mapping(address => bool))) public member_vacancy_starts;
 
-    struct Fact {
-        address from;
-        uint256 time;
-        string fact;
-    }
-
-    struct Fact_dict {
-        mapping(bytes32 => Fact) dict;
-        bytes32[] keys;
-    }
-
-    // member address => facts about member
-    mapping(address => Fact_dict) facts;
-
-    // member facts number_of_confirmations (sender, member, fact_id, is verify)
-    mapping(address => mapping(address => mapping(bytes32 => bool))) member_fact_confirmations;
-    // member => fact uuid => number of confirmations
-    mapping(address => mapping(bytes32 => uint256)) facts_confirmations_count;
-
     // events
     event NewMember(address member);
     event NewCompany(address company);
-    event NewVacancy(address company, bytes32 id);
-    event NewAction(address company, bytes32 vacancy_uuid);
+    event NewVacancy(address company, bytes32 uuid);
+    event NewAction(address company, bytes32 uuid);
 
     event NewPipelineMaxLength(address sender, uint256 count);
     event NewServiceFee(address sender, uint8 fee);
     event NewBeneficiary(address sender, address beneficiary);
 
-    event NewFact(address sender, bytes32 id);
-    event FactConfirmationAdded(address sender, address member, bytes32 fact_id);
-    event FactVerified(address member, bytes32 fact_id);
-
-    event MemberRevoked(address company, bytes32 vac_uuid, address member);
-    event MemberLevelUp(address company, bytes32 vac_uuid, address member, uint256 to);
-    event MemberPassPipeline(address company, bytes32 vac_uuid, address member);
+    event MemberRevoked(address company, bytes32 uuid, address member);
+    event MemberLevelUp(address company, bytes32 uuid, address member, uint256 to);
+    event MemberPassPipeline(address company, bytes32 uuid, address member);
 
     event MemberStatusChanged(address member, member_status status);
-    event Subscribed(address company, bytes32 vacancy_uuid, address member);
+    event Subscribed(address company, bytes32 uuid, address member);
 
     modifier whenVacancyEnabled(address _company, bytes32 _uuid) {
         require(vacancies[_company][_uuid].enabled);
         _;
     }
 
-    //"Vera", 1, "0xca35b7d915458ef540ade6068dfe2f44e8fa733c","0xca35b7d915458ef540ade6068dfe2f44e8fa733c"
-    function Oracle(string _name, uint8 _service_fee, address _beneficiary, address _token) public {
+    modifier onlyVerified() {
+        require(member_verified[msg.sender]);
+        _;
+    }
+
+    //"Vera", 1, "0xca35b7d915458ef540ade6068dfe2f44e8fa733c","0xca35b7d915458ef540ade6068dfe2f44e8fa733c", "0xe3632b9ab0571d2601e804dfddc65eb51ab19310"
+    function Oracle(string _name, uint8 _service_fee, address _beneficiary, address _token, address _facts) public {
         name = _name;
         service_fee = _service_fee;
         beneficiary = _beneficiary;
         token = ERC20(_token);
         pipeline_max_length = 6;
+        facts = Facts(_facts);
     }
 
-    function new_fact(address _member, string _fact) public {
-        bytes32 _id = keccak256(abi.encodePacked(_fact));
-        facts[_member].dict[_id] = Fact(msg.sender, now, _fact);
-        facts[_member].keys.push(_id);
-        emit NewFact(msg.sender, _id);
+    function verify_fact(address _member, bytes32 _id) public onlyVerified {
+        facts.verify_fact(_member, _id, msg.sender);
     }
 
-    function keys_of_facts_length(address _member) public view returns (uint) {
-        return facts[_member].keys.length;
+    function facts_confirmations_count(address _member, bytes32 _id) public view returns (uint256) {
+        return facts.facts_confirmations_count(_member, _id);
+    }
+
+    function new_fact(address _member, string _fact, bytes32 _fact_uuid) public {
+        facts.new_fact(_member, _fact, _fact_uuid, msg.sender);
+    }
+
+    function keys_of_facts_length(address _member) public view returns (uint256) {
+        return facts.keys_of_facts_length(_member);
     }
 
     function keys_of_facts(address _member) public view returns (bytes32[]) {
-        return facts[_member].keys;
+        return facts.keys_of_facts(_member);
     }
 
     function fact_key_by_id(address _member, uint256 _index) public view returns (bytes32) {
-        return facts[_member].keys[_index];
+        return facts.fact_key_by_id(_member, _index);
     }
 
     function get_fact(address _member, bytes32 _id) public view returns (address from, uint256 time, string fact) {
-        return (facts[_member].dict[_id].from,
-        facts[_member].dict[_id].time,
-        facts[_member].dict[_id].fact);
-    }
-
-    function verify_fact(address _member, bytes32 _id) public {
-        // member not verify factsct yet
-        require(!member_fact_confirmations[msg.sender][_member][_id]);
-        // member cannot verify his own fact
-        require(facts[_member].dict[_id].from != msg.sender);
-        facts_confirmations_count[_member][_id].add(1);
-        emit FactConfirmationAdded(msg.sender, _member, _id);
+        return facts.get_fact(_member, _id);
     }
 
     function new_pipeline_max_length(uint256 _new_max) public onlyOwner {
@@ -188,6 +171,10 @@ contract Oracle is Ownable {
 
     function get_members() public view returns (address[]) {
         return members;
+    }
+
+    function verify_member(address _member) public onlyOwner {
+        member_verified[_member] = true;
     }
 
     // called from company address
@@ -225,9 +212,9 @@ contract Oracle is Ownable {
         emit MemberStatusChanged(msg.sender, _status);
     }
 
-    function get_member_current_action_index(address _company_address, bytes32 _vac_uuid, address _member) public view returns (int256) {
+    function get_member_current_action_index(address _company_address,bytes32 _vac_uuid, address _member) public view returns (int256) {
         if (!member_vacancy_starts[_company_address][_vac_uuid][_member]) {
-            return - 1;
+            return -1;
         }
         return member_current_action_index[_company_address][_vac_uuid][_member];
     }
@@ -250,7 +237,7 @@ contract Oracle is Ownable {
 
     // must be called from company address
     function change_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index,
-        bytes32 _title, uint256 _fee, bool _app) public {
+        bytes32 _title,uint256 _fee, bool _app) public {
         require(_action_index < get_vacancy_pipeline_length(msg.sender, _vac_uuid));
         vacancy_pipeline[msg.sender][_vac_uuid][_action_index] = Action(_action_index, _title, _fee, _app);
     }
@@ -329,7 +316,7 @@ contract Oracle is Ownable {
     }
     // must call from member address
     function subscribe(address _company, bytes32 _vac_uuid) public whenVacancyEnabled(_company, _vac_uuid) {
-        require(get_member_current_action_index(_company, _vac_uuid, msg.sender) == - 1);
+        require(get_member_current_action_index(_company, _vac_uuid, msg.sender) == -1);
         member_vacancies[msg.sender].push(_vac_uuid);
         members_on_vacancy[_company][_vac_uuid].push(msg.sender);
         member_vacancy_starts[_company][_vac_uuid][msg.sender] = true;
