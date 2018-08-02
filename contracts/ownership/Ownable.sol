@@ -16,4 +16,8 @@ contract Ownable {
         require(_newOwner != address(0));
         owners[_newOwner] = true;
     }
+
+    function delOwner(address _owner) public onlyOwner {
+        owners[_owner] = false;
+    }
 }
