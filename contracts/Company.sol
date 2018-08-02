@@ -25,9 +25,21 @@ contract Company is Collaboratorable {
         oracle.new_company_member(_member);
     }
 
+    function del_collaborator_member(address _member) public onlyOwner {
+        delCollaborator(_member);
+    }
+
     function new_owner_member(address _member) public onlyOwner {
         require(!owners[_member]);
         newOwner(_member);
+        oracle.new_company_member(_member);
+    }
+
+    function del_owner_member(address _member) public onlyOwner {
+        delOwner(_member);
+    }
+
+    function new_member(address _member) public onlyCollaborator {
         oracle.new_company_member(_member);
     }
 

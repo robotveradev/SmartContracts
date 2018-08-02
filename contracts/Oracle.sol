@@ -5,6 +5,8 @@ import './math/SafeMath.sol';
 import './token/ERC20.sol';
 import './Member.sol';
 import './Facts.sol';
+import './Pipeline.sol';
+
 
 contract Oracle is Ownable {
     using SafeMath for uint256;
@@ -13,6 +15,7 @@ contract Oracle is Ownable {
     address public beneficiary;
     ERC20 public token;
     Facts facts;
+    Pipeline pipeline;
 
     enum member_status {open_to_suggestions, in_search_of_work, not_accepting_offers}
 
@@ -22,16 +25,7 @@ contract Oracle is Ownable {
 
     uint8 public service_fee;
 
-    uint256 public pipeline_max_length;
-
     uint8 public number_of_confirmations;
-
-    struct Action {
-        uint256 id;
-        bytes32 title;
-        uint256 fee;
-        bool approvable;
-    }
 
     struct Vacancy {
         bool enabled;
@@ -46,9 +40,6 @@ contract Oracle is Ownable {
 
     // company address => vacancy uuid => vacancy
     mapping(address => mapping(bytes32 => Vacancy)) public vacancies;
-
-    // company address => vacancy uuid => vacancy pipeline
-    mapping(address => mapping(bytes32 => Action[])) public vacancy_pipeline;
 
     // company address => vacancy uuid => candidate addresses, subscribed to vacancy
     mapping(address => mapping(bytes32 => address[])) public members_on_vacancy;
@@ -78,9 +69,7 @@ contract Oracle is Ownable {
     event NewMember(address member);
     event NewCompany(address company);
     event NewVacancy(address company, bytes32 uuid);
-    event NewAction(address company, bytes32 uuid);
 
-    event NewPipelineMaxLength(address sender, uint256 count);
     event NewServiceFee(address sender, uint8 fee);
     event NewBeneficiary(address sender, address beneficiary);
 
@@ -101,14 +90,51 @@ contract Oracle is Ownable {
         _;
     }
 
-    //"Vera", 1, "0xca35b7d915458ef540ade6068dfe2f44e8fa733c","0xca35b7d915458ef540ade6068dfe2f44e8fa733c", "0xe3632b9ab0571d2601e804dfddc65eb51ab19310"
-    function Oracle(string _name, uint8 _service_fee, address _beneficiary, address _token, address _facts) public {
+    //"Vera", 1, "0xca35b7d915458ef540ade6068dfe2f44e8fa733c","0xca35b7d915458ef540ade6068dfe2f44e8fa733c", "0x83be1f6e44a79014e1776835ce46acd00f035843"
+    function Oracle(string _name, uint8 _service_fee, address _beneficiary, address _token, address _facts, address _pipeline) public {
         name = _name;
         service_fee = _service_fee;
         beneficiary = _beneficiary;
         token = ERC20(_token);
-        pipeline_max_length = 6;
         facts = Facts(_facts);
+        pipeline = Pipeline(_pipeline);
+    }
+
+    // must be called from company address
+    function new_vacancy_pipeline_action(bytes32 _vac_uuid, bytes32 _title, uint256 _fee, bool _appr) public {
+        pipeline.new_vacancy_pipeline_action(msg.sender, _vac_uuid, _title, _fee, _appr);
+    }
+
+     // must be called from company address
+    function change_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index,
+        bytes32 _title, uint256 _fee, bool _appr) public {
+        pipeline.change_vacancy_pipeline_action(msg.sender, _vac_uuid, _action_index, _title, _fee, _appr);
+    }
+
+    // must be called from company address
+    function delete_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index) public {
+        pipeline.delete_vacancy_pipeline_action(msg.sender, _vac_uuid, _action_index);
+    }
+
+    // must be called from company address
+    function move_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _from_pos, uint256 _to_pos) public {
+        pipeline.move_vacancy_pipeline_action(msg.sender, _vac_uuid, _from_pos, _to_pos);
+    }
+
+    function new_pipeline_max_length(uint256 _new_max) public onlyOwner {
+        pipeline.new_pipeline_max_length(_new_max);
+    }
+
+    function pipeline_max_length() public view returns (uint256) {
+        return pipeline.pipeline_max_length();
+    }
+
+    function get_vacancy_pipeline_length(address _company, bytes32 _vac_uuid) public view returns (uint256) {
+        return pipeline.get_vacancy_pipeline_length(_company, _vac_uuid);
+    }
+
+    function vacancy_pipeline(address _company, bytes32 _vac_uuid, uint256 _index) public view returns (uint256, bytes32, uint256, bool) {
+        return pipeline.vacancy_pipeline(_company, _vac_uuid, _index);
     }
 
     function verify_fact(address _member, bytes32 _id) public onlyVerified {
@@ -137,11 +163,6 @@ contract Oracle is Ownable {
 
     function get_fact(address _member, bytes32 _id) public view returns (address from, uint256 time, string fact) {
         return facts.get_fact(_member, _id);
-    }
-
-    function new_pipeline_max_length(uint256 _new_max) public onlyOwner {
-        pipeline_max_length = _new_max;
-        emit NewPipelineMaxLength(msg.sender, _new_max);
     }
 
     // percent awarded for test/interview passed by member
@@ -227,55 +248,7 @@ contract Oracle is Ownable {
         emit NewVacancy(msg.sender, _uuid);
     }
 
-    // must be called from company address
-    function new_vacancy_pipeline_action(bytes32 _vac_uuid, bytes32 _title, uint256 _fee, bool _appr) public {
-        uint256 new_index = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
-        require(new_index < pipeline_max_length);
-        vacancy_pipeline[msg.sender][_vac_uuid].push(Action(new_index, _title, _fee, _appr));
-        emit NewAction(msg.sender, _vac_uuid);
-    }
 
-    // must be called from company address
-    function change_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index,
-        bytes32 _title,uint256 _fee, bool _app) public {
-        require(_action_index < get_vacancy_pipeline_length(msg.sender, _vac_uuid));
-        vacancy_pipeline[msg.sender][_vac_uuid][_action_index] = Action(_action_index, _title, _fee, _app);
-    }
-
-    // must be called from company address
-    function delete_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _action_index) public returns (bool) {
-        uint256 pipeline_length = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
-        require(_action_index < pipeline_length);
-        delete vacancy_pipeline[msg.sender][_vac_uuid][_action_index];
-        for (uint256 i = _action_index; i < pipeline_length - 1; i++) {
-            vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i + 1];
-            vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id - 1;
-        }
-        vacancy_pipeline[msg.sender][_vac_uuid].length--;
-    }
-    // must be called from company address
-    function move_vacancy_pipeline_action(bytes32 _vac_uuid, uint256 _from_pos, uint256 _to_pos) public {
-        if (_from_pos == _to_pos) {
-            return;
-        }
-        uint256 pipeline_length = get_vacancy_pipeline_length(msg.sender, _vac_uuid);
-        require(_from_pos < pipeline_length && _to_pos < pipeline_length);
-        Action memory act = vacancy_pipeline[msg.sender][_vac_uuid][_from_pos];
-        uint256 i;
-        if (_from_pos > _to_pos) {
-            for (i = _from_pos; i > _to_pos; i--) {
-                vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i - 1];
-                vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id + 1;
-            }
-        } else {
-            for (i = _from_pos; i < _to_pos; i++) {
-                vacancy_pipeline[msg.sender][_vac_uuid][i] = vacancy_pipeline[msg.sender][_vac_uuid][i + 1];
-                vacancy_pipeline[msg.sender][_vac_uuid][i].id = vacancy_pipeline[msg.sender][_vac_uuid][i].id - 1;
-            }
-        }
-        act.id = _to_pos;
-        vacancy_pipeline[msg.sender][_vac_uuid][_to_pos] = act;
-    }
     // must be called from company address
     function change_vacancy_amount(bytes32 _uuid, uint256 _allowed) public {
         vacancies[msg.sender][_uuid].allowed = _allowed;
@@ -301,10 +274,6 @@ contract Oracle is Ownable {
         return vacancy_uuids[_company_address][_index];
     }
 
-    function get_vacancy_pipeline_length(address _company, bytes32 _uuid) public view returns (uint256) {
-        return vacancy_pipeline[_company][_uuid].length;
-    }
-
     // must be called from company address
     function disable_vac(bytes32 _uuid) public {
         vacancies[msg.sender][_uuid].enabled = false;
@@ -326,21 +295,23 @@ contract Oracle is Ownable {
     function process_action(address _company, bytes32 _vac_uuid, address _member) private whenVacancyEnabled(_company, _vac_uuid) {
         require(!member_vacancy_pass[_company][_vac_uuid][_member]);
 
-        if (member_current_action_index[_company][_vac_uuid][_member] >= get_vacancy_pipeline_length(_company, _vac_uuid)) {
+        if (member_current_action_index[_company][_vac_uuid][_member] >= pipeline.get_vacancy_pipeline_length(_company, _vac_uuid)) {
             member_vacancy_pass[_company][_vac_uuid][_member] = true;
             emit MemberPassPipeline(_company, _vac_uuid, _member);
             return;
         }
-        Action memory current_action = vacancy_pipeline[_company][_vac_uuid][member_current_action_index[_company][_vac_uuid][_member]];
-        if (current_action.fee > 0) {
-            require(vacancies[_company][_vac_uuid].allowed >= current_action.fee);
-            uint256 service_amount = current_action.fee.div(100).mul(service_fee);
-            uint256 member_reward_amount = current_action.fee.sub(service_amount);
+
+        uint256 action_id = pipeline.get_action_id(_company, _vac_uuid, member_current_action_index[_company][_vac_uuid][_member]);
+        uint256 action_fee = pipeline.get_action_fee(_company, _vac_uuid, member_current_action_index[_company][_vac_uuid][_member]);
+        if (action_fee > 0) {
+            require(vacancies[_company][_vac_uuid].allowed >= action_fee);
+            uint256 service_amount = action_fee.div(100).mul(service_fee);
+            uint256 member_reward_amount = action_fee.sub(service_amount);
             token.transferFrom(_company, beneficiary, service_amount);
             token.transferFrom(_company, _member, member_reward_amount);
-            vacancies[_company][_vac_uuid].allowed = vacancies[_company][_vac_uuid].allowed.sub(current_action.fee);
+            vacancies[_company][_vac_uuid].allowed = vacancies[_company][_vac_uuid].allowed.sub(action_fee);
         }
-        if (vacancy_pipeline[_company][_vac_uuid].length - 1 == current_action.id) {
+        if (pipeline.get_vacancy_pipeline_length(_company, _vac_uuid) - 1 == action_id) {
             member_vacancy_pass[_company][_vac_uuid][_member] = true;
             emit MemberPassPipeline(_company, _vac_uuid, _member);
         } else {
@@ -352,7 +323,8 @@ contract Oracle is Ownable {
 
     function level_up(address _company, bytes32 _vac_uuid, address _member) public onlyOwner {
         require(member_vacancy_starts[_company][_vac_uuid][_member]);
-        require(!vacancy_pipeline[_company][_vac_uuid][member_current_action_index[_company][_vac_uuid][_member]].approvable);
+        bool action_appr = pipeline.get_action_approvable(_company, _vac_uuid, member_current_action_index[_company][_vac_uuid][_member]);
+        require(!action_appr);
         process_action(_company, _vac_uuid, _member);
     }
 

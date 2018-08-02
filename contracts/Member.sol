@@ -39,8 +39,20 @@ contract Member is Withdrawable {
         Company(_company).new_collaborator_member(_member);
     }
 
+    function del_collaborator_member(address _company, address _member) public onlyOwner {
+        Company(_company).del_collaborator_member(_member);
+    }
+
     function new_owner_member(address _company, address _member) public onlyOwner {
         Company(_company).new_owner_member(_member);
+    }
+
+    function del_owner_member(address _company, address _member) public onlyOwner {
+        Company(_company).del_owner_member(_member);
+    }
+
+    function new_member(address _company, address _member) public onlyOwner {
+        Company(_company).new_member(_member);
     }
 
     function new_vacancy(address _company, bytes32 _uuid, uint256 _allowed) public onlyOwner {
