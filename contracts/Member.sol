@@ -15,6 +15,10 @@ contract Member is Withdrawable {
         oracle.new_member();
     }
 
+    function new_fact(address _member, string _fact, bytes32 _fact_uuid) public {
+        oracle.new_fact(_member, _fact, _fact_uuid);
+    }
+
     function verify_fact(address _member, bytes32 _fact_id) public onlyOwner {
         oracle.verify_fact(_member, _fact_id);
     }
