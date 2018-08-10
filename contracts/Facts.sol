@@ -20,7 +20,7 @@ contract Facts is Ownable {
     mapping(address => Fact_dict) facts;
 
     // member facts number_of_confirmations (sender, member, fact_id, is verify )
-    mapping(address => mapping(address => mapping(bytes32 => bool))) member_fact_confirmations;
+    mapping(address => mapping(address => mapping(bytes32 => bool))) public member_fact_confirmations;
     // member => fact uuid => number of confirmations
     mapping(address => mapping(bytes32 => uint256)) public facts_confirmations_count;
 
