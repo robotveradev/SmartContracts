@@ -25,8 +25,6 @@ contract Oracle is Ownable {
 
     uint8 public service_fee;
 
-    uint8 public number_of_confirmations;
-
     struct Vacancy {
         bool enabled;
         uint allowed;
@@ -135,6 +133,10 @@ contract Oracle is Ownable {
 
     function vacancy_pipeline(address _company, bytes32 _vac_uuid, uint256 _index) public view returns (uint256, bytes32, uint256, bool) {
         return pipeline.vacancy_pipeline(_company, _vac_uuid, _index);
+    }
+
+    function member_fact_confirmations(address _verifier, address _member, bytes32 _fact_uuid) public view returns (bool) {
+        return facts.member_fact_confirmations(_verifier, _member, _fact_uuid);
     }
 
     function verify_fact(address _member, bytes32 _id) public onlyVerified {
