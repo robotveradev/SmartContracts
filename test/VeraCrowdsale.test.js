@@ -99,14 +99,18 @@ contract('VeraCrowdsale', function (accounts) {
   });
 
   describe('Check constant functions', async function () {
+    it('computeTokens for 9.99 USD', async function () {
+      result = await this.crowdsale.computeTokens(999);
+      result.should.be.bignumber.equal(0);
+    });
+    it('computeTokens for 10 USD', async function () {
+      result = await this.crowdsale.computeTokens(1000);
+      result.should.be.bignumber.equal(5e18);
+    });
     it('computeBonus for 7999.99 USD', async function () {
       result = await this.crowdsale.computeBonuses(799999);
       result[0].should.be.bignumber.equal(0);
       result[1].should.be.bignumber.equal(0x0);
-    });
-    it('computeTokens for 7999.99 USD', async function () {
-      result = await this.crowdsale.computeTokens(799999);
-      result.should.be.bignumber.equal(0);
     });
     it('computeBonus for 8000 USD', async function () {
       result = await this.crowdsale.computeBonuses(800000);
@@ -411,7 +415,7 @@ contract('VeraCrowdsale', function (accounts) {
         await this.crowdsale.addKycVerifiedInvestor(accounts[0], { from: accounts[1] }).should.be.fulfilled;
       });
       it('should reject payments less than minDeposit', async function () {
-        await this.crowdsale.send(ether(18.5)).should.be.rejectedWith(EVMRevert);
+        await this.crowdsale.send(ether(0.023)).should.be.rejectedWith(EVMRevert);
       });
       describe('check actual deposit effects', function () {
         describe('by 432.12 USD/ETH', function () {
@@ -422,8 +426,8 @@ contract('VeraCrowdsale', function (accounts) {
             result = await this.oracle.ethPriceInCents();
             result.should.be.bignumber.equal(this.ethPriceInCents);
           });
-          it('18.5 ETH should be rejected  - less than minDeposit', async function () {
-            await this.crowdsale.send(ether(18.5)).should.be.rejectedWith(EVMRevert);
+          it('0.023 ETH should be rejected  - less than minDeposit', async function () {
+            await this.crowdsale.send(ether(0.023)).should.be.rejectedWith(EVMRevert);
           });
           it('18.6 ETH', assertPaymentOk(18.6, 20, 1));
         });
@@ -443,8 +447,8 @@ contract('VeraCrowdsale', function (accounts) {
             result = await this.oracle.ethPriceInCents();
             result.should.be.bignumber.equal(this.ethPriceInCents);
           });
-          it('1.37 ETH should be rejected  - less than minDeposit', async function () {
-            await this.crowdsale.send(ether(1.37)).should.be.rejectedWith(EVMRevert);
+          it('0.00171 ETH should be rejected  - less than minDeposit', async function () {
+            await this.crowdsale.send(ether(0.00171)).should.be.rejectedWith(EVMRevert);
           });
           it('1.4 ETH', assertPaymentOk(1.4, 20, 1));
           it('3.4 ETH', assertPaymentOk(3.4, 20, 1));
